@@ -1,0 +1,1347 @@
+	DEVICE 	ZXSPECTRUM48
+	OUTPUT	flash3.cod
+;LMN128 - MB03+ FLASH utility   
+;16KB size of flash block 
+	
+         org  25000
+start
+         di
+         ld   a,5
+         out  (254),a
+         call T_START
+
+         ld   hl,TEXT1
+         ld   bc,#0202
+         call T42_TEXT
+         ld   hl,TEXT2
+         ld   bc,#0307
+         call T42_TEXT
+         ld   hl,TEXT3
+         ld   bc,#0501
+         call T42_TEXT
+/*         ld   hl,TEXT31
+         ld   bc,#060F
+         call T42_TEXT
+         ld   hl,TEXT32
+         ld   bc,#070F
+         call T42_TEXT
+         ld   hl,TEXT33
+         ld   bc,#080F
+         call T42_TEXT */
+         ld   hl,FW1
+         ld   bc,#021E
+         call T42_TEXT
+
+;test klavesnice
+         call ANYKEY
+         cp   "0"
+         jp   c,END
+         cp   ":"       ;0-9 range
+         jp   c,range09
+         cp "A"         ;A-Z range
+         jp c,END
+         cp "["
+         jp nc,END
+rangeAZ push af
+        sub  "A"-10
+        jr AZ           
+;vypocet bloku a modifikace ;0-9 range
+range09  push af
+         sub  "0"
+AZ        sla  a
+         ld   (BLOCK+1),a
+         ld   hl,TEXT10
+         ld   bc,#0701
+         call T42_TEXT
+         pop  af
+         ld   bc,#0707
+         call T42
+;ZXi enable flash
+        xor a
+        ld bc,#203B
+        out (c),a
+		
+        ld bc,#213B
+        in a,(c)         //remember machine
+        push af
+        ld a,#FF	 //HW - FF - Flash firmware
+	out (c),a
+
+;Ultimator enable flash
+        ld a,%01100011   //enable flash and write area0 and 1
+        out (#53),a
+        xor a
+        out (#27),a      ;high byte of Page in Area0 #0000-#1FFF
+        out (#67),a      ;high byte of Page in Area1
+BLOCK   ld a,0           ;page 0+ Area0
+        out (#07),a
+        inc a            ;page 1+ Area1
+        out (#47),a
+        
+        
+
+;erase sectors (2KWord sector) 8 sectors to erase
+        ld   hl,TEXT11
+        ld   bc,#0A01
+        call T42_TEXT
+
+        ld b,#08        ;8 sector to erase
+        ld de,#0000
+1       ld hl,#0555
+        ld a,#AA
+        ld (hl),a
+        ld hl,#02AA
+        ld a,#55
+        ld (hl),a
+        ld hl,#0555
+        ld a,#80
+        ld (hl),a
+        ld hl,#0555
+        ld a,#AA
+        ld (hl),a
+        ld hl,#02AA
+        ld a,#55
+        ld (hl),a
+        ld a,#50
+        ld (de),a
+2       ld a,(de)
+        rlca
+        jr nc,2B        ;Data# Polling (DQ7) 0-erase is in progress, 1-end of erase
+        ld a,8          ;add 2K
+        add a,d
+        ld d,a        
+        djnz 1B
+;BAR init
+        ld   a,1       
+        ld   hl,#0B05
+        call BARINIT
+;text        
+        ld   hl,TEXT4
+        ld   bc,#0A01
+        call T42_TEXT
+;word program
+        ld de,#8000     ; from (ZX RAM)
+        ld hl,#0000     ; to (flash)    
+1       ld bc,#0555
+        ld a,#AA
+        ld (bc),a
+        ld bc,#02AA
+        ld a,#55
+        ld (bc),a
+        ld bc,#0555
+        ld a,#A0
+        ld (bc),a
+        ld a,(de)       ;read from ZX RAM
+        ld (hl),a       ;write to FLASH  
+2       cp (hl)
+        jr nz,2B        ;Data# Polling (DQ7) for program is different and use complement DQ7 bit, 10uS is maximum write time (cca 40T states), slower but more easy is test reading writed data
+        inc hl
+        inc de
+        ld a,l
+        and 127         ;show BAR every 128 bytes
+        call z,BAR
+        ld a,h
+        cp #40          ;end of 16KB
+        jr nz,1B
+
+        ld   hl,TEXT5
+        ld   bc,#0A01
+        call T42_TEXT
+;verify
+         ld   hl,TEXT6
+         ld   bc,#1001
+         call T42_TEXT
+         ld   a,1
+         ld   hl,#1105
+         call BARINIT
+
+         ld   hl,0         ;reset of errors counter
+         ld   (ERR+2),hl
+         ld   hl,32768
+         call VERIFY
+
+         ld   bc,#1023
+         ld   hl,(ERR+2)
+         ld   a,h
+         or   l
+         jr   z,END2
+         call NUMBER4
+         ld   hl,TEXT7
+         ld   bc,#1001
+         call T42_TEXT
+         jr   END1
+
+END2     ld   hl,TEXT9
+         ld   bc,#1001
+         call T42_TEXT
+
+END1     ld   hl,TEXT8
+        ld   bc,#160A
+        call T42_TEXT
+        call ANYKEY
+    pop af
+        ld bc,#213B
+        out (c),a       //back to previous machine
+
+END     ei
+        ret        
+
+;------------------------------
+VERIFY   ld   de,0
+         ld   bc,16384/128
+VER1
+         push bc
+         ld   bc,#8000
+VER2     ld   a,(de)
+         cp   (hl)
+         call nz,ERR
+         inc  hl
+         inc  de
+         djnz VER2
+         xor  a
+         or   c
+         ld   a,31
+         jr   z,SKOK
+         ld   a,"!"
+
+SKOK     ld   (ZNAK+1),a
+         call BAR
+
+         pop  bc
+         dec  bc
+         ld   a,b
+         or   c
+         jr   nz,VER1
+         ret
+
+ERR      exx
+         ld   hl,0
+         inc  hl
+         ld   (ERR+2),hl
+         exx
+         inc  c
+         ret
+
+;showing of BAR        
+BARINIT
+         ld   (COUNTER+1),a
+         ld   (COUNT_I+1),a
+         ld   (COUNT_P+1),hl
+         ld   a,l
+         ld   (COUNT_P1+1),a
+         ld   a,31
+         ld   (ZNAK+1),a
+
+         ret
+
+BAR      push af
+         push bc
+         push de
+         push hl
+
+
+COUNTER  ld   a,0
+         dec  a
+         ld   (COUNTER+1),a
+         jr   nz,BAR_END
+COUNT_I  ld   a,0
+         ld   (COUNTER+1),a
+COUNT_P  ld   bc,0
+ZNAK     ld   a,31
+         push bc
+         call T42
+         pop  hl
+         inc  l
+         ld   a,37
+         cp   l
+         jr   nz,BAR_1
+         inc  h
+COUNT_P1 ld   l,5
+
+BAR_1    ld   (COUNT_P+1),hl
+
+BAR_END  pop  hl
+         pop  de
+         pop  bc
+         pop  af
+         ret
+/*
+         push af
+;vypocet bloku a modifikace
+         sub  "1"
+         sla  a
+         or   %10100000
+         ld   (BLOCK_A+1),a
+         ld   (BLOCK_A1+1),a
+         inc  a
+         ld   (BLOCK_B+1),a
+         ld   (BLOCK_B1+1),a
+
+         ld   hl,TEXT10
+         ld   bc,#0801
+         call T42_TEXT
+         pop  af
+         ld   bc,#0807
+         call T42
+
+         ld   hl,TEXT4
+         ld   bc,#0A01
+         call T42_TEXT
+         ld   a,2
+         ld   hl,#0B05
+         call BARINIT
+
+        call UNLOCK
+BLOCK_A  ld   a,%10100000
+         out  (23),a
+         ld   hl,32768
+         call PROGRAM
+BLOCK_B  ld   a,%10100001
+         out  (23),a
+         ld   hl,49152
+         call PROGRAM
+         call LOCK
+
+         ld   hl,TEXT5
+         ld   bc,#0A01
+         call T42_TEXT
+         ld   hl,TEXT6
+         ld   bc,#1001
+         call T42_TEXT
+
+         ld   a,1
+         ld   hl,#1105
+         call BARINIT
+
+
+         ld   hl,0
+         ld   (ERR+2),hl
+BLOCK_A1 ld   a,%10100000
+         out  (23),a
+         ld   hl,32768
+         call VERIFY
+BLOCK_B1 ld   a,%10100001
+         out  (23),a
+         ld   hl,49152
+         call VERIFY
+
+         ld   bc,#1023
+         ld   hl,(ERR+2)
+         ld   a,h
+         or   l
+         jr   z,END2
+         call NUMBER4
+         ld   hl,TEXT7
+         ld   bc,#1001
+         call T42_TEXT
+         jr   END1
+
+END2     ld   hl,TEXT9
+         ld   bc,#1001
+         call T42_TEXT
+
+END1     ld   hl,TEXT8
+         ld   bc,#160A
+         call T42_TEXT
+         call ANYKEY
+END
+         ld   a,64
+         out  (23),a
+         ei
+         ret
+
+;------------------------------
+VERIFY   ld   de,0
+         ld   bc,16384/64/4
+VER1
+         push bc
+         ld   bc,0
+VER2     ld   a,(de)
+         cp   (hl)
+         call nz,ERR
+         inc  hl
+         inc  de
+         djnz VER2
+         xor  a
+         or   c
+         ld   a,31
+         jr   z,SKOK
+         ld   a,"!"
+
+SKOK     ld   (ZNAK+1),a
+         call BAR
+
+         pop  bc
+         dec  bc
+         ld   a,b
+         or   c
+         jr   nz,VER1
+         ret
+
+ERR      exx
+         ld   hl,0
+         inc  hl
+         ld   (ERR+2),hl
+         exx
+         inc  c
+         ret
+;------------------------------
+
+;------------------------------
+PROGRAM
+         ld   de,0
+         ld   bc,16384/128
+
+K16      push bc
+         ld   b,128
+
+PAGE     ld   a,(hl)
+         ld   (de),a
+         inc  hl
+         inc  de
+         djnz PAGE
+
+         ld   c,a
+         dec  de
+NO_END   ld   a,(de)
+         xor  c
+         rlca
+         jr   c,NO_END
+
+         call BAR
+
+         inc  de
+
+         pop  bc
+         dec  bc
+         ld   a,b
+         or   c
+         jr   nz,K16
+         ret
+
+UNLOCK
+         ld   a,%10100001
+         out  (23),a
+         ld   a,#AA
+         ld   (#1555),a
+
+         ld   a,%10100000
+         out  (23),a
+         ld   a,#55
+         ld   (#2AAA),a
+
+         ld   a,%10100001
+         out  (23),a
+         ld   a,#80
+         ld   (#1555),a
+         ld   a,#AA
+         ld   (#1555),a
+
+         ld   a,%10100000
+         out  (23),a
+         ld   a,#55
+         ld   (#2AAA),a
+
+         ld   a,%10100001
+         out  (23),a
+         ld   a,#20
+         ld   (#1555),a
+
+         ret
+
+LOCK
+         ld   a,%10100001
+         out  (23),a
+         ld   a,#AA
+         ld   (#1555),a
+
+         ld   a,%10100000
+         out  (23),a
+         ld   a,#55
+         ld   (#2AAA),a
+
+         ld   a,%10100001
+         out  (23),a
+         ld   a,#A0
+         ld   (#1555),a
+
+         ret
+*/
+;------------------------------
+T_X      equ  0
+T_Y      equ  0
+T_XLEN   equ  31
+T_YLEN   equ  24
+T_ATTR1  equ  112
+T_ATTR2  equ  104
+T_ATTR3  equ  70
+;------------------------------
+T_START
+T_ATTR   ld   b,T_Y+1
+         ld   de,32
+         ld   hl,22528+T_X-32
+T_COL1   add  hl,de
+         djnz T_COL1
+         ld   bc,T_XLEN
+         ld   d,h
+         ld   e,l
+         inc  de
+         ld   (hl),T_ATTR1
+         push hl
+         push bc
+         ldir
+         pop  bc
+         pop  hl
+         dec  bc
+         ld   a,T_YLEN
+         dec  a
+         ld   de,32
+         add  hl,de
+T_COL2   push hl
+         push bc
+         push de
+         ld   (hl),T_ATTR2
+         ld   d,h
+         ld   e,l
+         inc  de
+         ldir
+         ex   de,hl
+         ld   (hl),T_ATTR1
+         pop  de
+         pop  bc
+         pop  hl
+         add  hl,de
+         dec  a
+         jr   nz,T_COL2
+
+T_CARY
+         ld   b,T_Y
+         ld   c,T_X
+         ld   hl,T_HELP1
+         push bc
+         call  T_ONE
+         pop  bc
+         inc  b
+         ld   hl,T_HELP2
+         push bc
+         call T_ONE
+         pop  bc
+         inc  b
+         ld   a,T_YLEN
+         sub  3
+T_CAR1   ld   hl,T_HELP3
+         push bc
+         push af
+         call T_ONE
+         pop  af
+         pop  bc
+         inc  b
+         dec  a
+         jr   nz,T_CAR1
+         ld   hl,T_HELP4
+
+T_ONE    ld   a,(hl)
+         push hl
+         push bc
+         call T_ZNAK
+         pop  bc
+         pop  hl
+         inc  c
+         inc  hl
+         ld   d,T_XLEN-1
+         ld   e,(hl)
+         push hl
+T_CYKL   push bc
+         push de
+         ld   a,e
+         call T_ZNAK
+         pop  de
+         pop  bc
+         inc  c
+         dec  d
+         jr   nz,T_CYKL
+         pop  hl
+         inc  hl
+         ld   a,(hl)
+
+T_ZNAK   ld   h,0
+         ld   l,a
+         ld   de,T_0
+         add  hl,hl
+         add  hl,hl
+         add  hl,hl
+         add  hl,de
+         ld   a,b
+         rrca
+         rrca
+         rrca
+         and  #E0
+         add  a,c
+         ld   e,a
+         ld   a,b
+         and  #18
+         or   #40
+         ld   d,a
+         ld   b,8
+T_ZNA1   ld   a,(hl)
+         ld   (de),a
+         inc  hl
+         inc  d
+         djnz T_ZNA1
+         ret
+
+T_HELP1  defb 0,1,2
+T_HELP2  defb 3,10,6
+T_HELP3  defb 3,10,4
+T_HELP4  defb 5,9,7
+
+T_0      defb 255
+         defb 129
+         defb 129
+         defb 189
+         defb 189
+         defb 129
+         defb 129
+         defb 255
+T_1      defb 255
+         defb 0
+         defb 0
+         defb 0
+         defb 0
+         defb 0
+         defb 0
+         defb 255
+T_2      defb 255
+         defb 129
+         defb %10111001
+         defb %10111001
+         defb %10011101
+         defb %10011101
+         defb 129
+         defb 255
+T_3      defb 128
+         defb 128
+         defb 128
+         defb 128
+         defb 128
+         defb 128
+         defb 128
+         defb 128
+T_4      defb 129
+         defb 129
+         defb 129
+         defb 129
+         defb 129
+         defb 129
+         defb 129
+         defb 129
+T_5      defb 128
+         defb 128
+         defb 128
+         defb 128
+         defb 128
+         defb 128
+         defb 128
+         defb 255
+T_6      defb 255
+         defb 129
+         defb 153
+         defb 189
+         defb 153
+         defb 153
+         defb 129
+         defb 255
+T_7      defb 255
+         defb 129
+         defb 153
+         defb 153
+         defb 189
+         defb 153
+         defb 129
+         defb 255
+T_8      defb 255
+         defb 129
+         defb 129
+         defb 153
+         defb 153
+         defb 129
+         defb 129
+         defb 255
+T_9      defb 0
+         defb 0
+         defb 0
+         defb 0
+         defb 0
+         defb 0
+         defb 0
+         defb 255
+T_10     defb 0
+         defb 0
+         defb 0
+         defb 0
+         defb 0
+         defb 0
+         defb 0
+         defb 0
+;------------------------------
+;TISK CISLA BC-POZICE HL-HODNOT
+;TISKNE CISLO TYPU INTEGER
+;STAR-RUTINA TISKU 1 ZNAKU NA
+;POZICI BC (0,0)
+NUMBER4  ld   de,-10000
+         call NUM_JED
+NUMBER3  ld   de,-1000
+         call NUM_JED
+NUMBER2  ld   de,-100
+         call NUM_JED
+NUMBER1  ld   de,-10
+         call NUM_JED
+NUMBER0  ld   a,l
+         add  a,48
+         jp   T42
+
+NUM_JED  xor  a
+NUM_JED1 add  hl,de
+         jr   nc,NUM_PRIC
+         inc  a
+         jr   NUM_JED1
+NUM_PRIC sbc  hl,de
+         add  a,48
+         push bc
+         push hl
+         call T42
+         pop  hl
+         pop  bc
+         inc  c
+         ret
+
+T42_TEXT ld   a,(hl)
+         and  127
+         push hl
+         push bc
+         call T42
+         pop  bc
+         pop  hl
+         inc  c
+         ld   a,(hl)
+         rla
+         inc  hl
+         jr   nc,T42_TEXT
+         ret
+
+;Tisk 42 znaku na radek
+;pocatek vlevo nahore (0,0)
+
+T42      ld   de,T42_SADA-256
+         ld   h,0
+         ld   l,a
+         add  hl,hl
+         add  hl,hl
+         add  hl,hl
+         add  hl,de
+         ld   a,b
+         rrca
+         rrca
+         rrca
+         and  %11100000
+         ld   e,a
+         ld   a,b
+         and  %00011000
+         or   %01000000
+         ld   d,a
+         ld   a,c
+         and  %00111100
+         rrca
+         rrca
+         ld   b,a
+         ld   a,c
+         and  %00111100
+         sub  b
+         add  a,e
+         ld   e,a
+         ld   a,c
+         and  %00000011
+         ld   b,8
+         jr   nz,T42_T123
+T42_T0   ld   a,(de)
+         and  %00000011
+         or   (hl)
+         ld   (de),a
+         inc  d
+         inc  hl
+         djnz T42_T0
+         ret
+
+T42_T123 cp   2
+         jr   c,T42_T1
+         jr   z,T42_T2
+T42_T3   inc  e
+         inc  e
+T42_T31  ld   a,(de)
+         and  %11000000
+         ld   c,a
+         ld   a,(hl)
+         rrca
+         rrca
+         or   c
+         ld   (de),a
+         inc  d
+         inc  hl
+         djnz T42_T31
+         ret
+
+T42_T1   xor  a
+         ld   (T42_P3),a
+         ld   (T42_P4),a
+         ld   a,%11111100
+         ld   (T42_P1+1),a
+         cpl
+         call T42_P_A
+         ld   a,%00001111
+         ld   (T42_P1+1),a
+         cpl
+         jr   T42_P_B
+
+T42_T2   inc  e
+         ld   a,7
+         ld   (T42_P3),a
+         ld   (T42_P4),a
+         ld   a,%11110000
+         ld   (T42_P1+1),a
+         cpl
+         call T42_P_A
+         ld   a,%00111111
+         ld   (T42_P1+1),a
+         cpl
+
+T42_P_B  ld   b,8
+T42_P_A  ld   (T42_P2+1),a
+         push hl
+         push de
+T42_P0   ld   a,(de)
+T42_P1   and  0
+         ld   c,a
+         ld   a,(hl)
+         rlca
+         rlca
+T42_P3   nop
+T42_P4   nop
+T42_P2   and  0
+         or   c
+         ld   (de),a
+         inc  d
+         inc  hl
+         djnz T42_P0
+         pop  de
+         pop  hl
+         inc  e
+         ret
+
+         defb %11111100
+         defb %10000100
+         defb %10000100
+         defb %10000100
+         defb %10000100
+         defb %10000100
+         defb %10000100
+         defb %11111100
+
+         defb %00000000
+         defb %01111000
+         defb %01111000
+         defb %01111000
+         defb %01111000
+         defb %01111000
+         defb %01111000
+         defb %00000000
+
+T42_SADA defw 0,0,0,0
+         defw 35064,20560
+         defw 32,32,53456,0,0,0
+         defw 63568,20560,63568
+         defw 80,63520,63648
+         defw 63528,32,51200
+         defw 12504,55392,152
+         defw 8192,8272,34896
+         defw 112,24624,0,0,0
+         defw 24624
+         defw 24672
+         defw 24672
+         defw 48
+         defw 12384
+         defw 12336
+         defw 12336
+         defw 96
+         defw 20480
+		 defw 63520
+         defw 20512
+         defw 0
+         defw 8192
+         defw 63520
+         defw 8224
+         defw 0
+         defw 0
+         defw 0
+         defw 12288
+         defw 96
+         defw 0
+         defw 30720
+         defw 0
+         defw 0
+         defw 0
+         defw 0
+         defw 24576
+         defw 96
+         defw 2048
+         defw 12312
+         defw 49248
+         defw 128
+         defw 55408
+         defw 51432
+         defw 51400
+         defw 112
+         defw 24608
+         defw 24800
+         defw 24672
+         defw 240
+         defw 34928
+         defw 28680
+         defw 49344
+         defw 248
+         defw 51312
+         defw 12296
+         defw 51208
+         defw 112
+         defw 8208
+         defw 53312
+         defw 4344
+         defw 16
+         defw 49400
+         defw 61632
+         defw 51208
+         defw 112
+         defw 51312
+         defw 61632
+         defw 51400
+         defw 112
+         defw 6392
+         defw 12312
+         defw 49248
+         defw 128
+         defw 51312
+         defw 28872
+         defw 51400
+         defw 112
+         defw 51312
+         defw 30920
+         defw 51208
+         defw 112
+         defw 0
+         defw 96
+         defw 24576
+         defw 0
+         defw 0
+         defw 48
+         defw 12288
+         defw 96
+         defw 6144
+         defw 24624
+         defw 6192
+         defw 0
+         defw 0
+         defw 120
+         defw 120
+         defw 0
+         defw 24576
+         defw 6192
+         defw 24624
+         defw 0
+         defw 55408
+         defw 12312
+         defw 32
+         defw 32
+         defw 34928
+         defw 55464
+         defw 32944
+         defw 112
+         defw 51312
+         defw 63688
+         defw 51400
+         defw 200
+         defw 51440
+         defw 61640
+         defw 51400
+         defw 240
+         defw 51312
+         defw 49344
+         defw 51392
+         defw 112
+         defw 51440
+         defw 51400
+         defw 51400
+         defw 240
+         defw 49400
+         defw 61632
+         defw 49344
+         defw 248
+         defw 49400
+         defw 61632
+         defw 49344
+         defw 192
+         defw 51312
+         defw 55488
+         defw 51400
+         defw 112
+         defw 51400
+         defw 63688
+         defw 51400
+         defw 200
+         defw 24824
+         defw 24672
+         defw 24672
+         defw 248
+         defw 2056
+         defw 2056
+         defw 51400
+         defw 112
+         defw 51400
+         defw 57552
+         defw 51408
+         defw 200
+         defw 49344
+         defw 49344
+         defw 49344
+         defw 248
+         defw 55432
+         defw 51432
+         defw 51400
+         defw 200
+         defw 51400
+         defw 59592
+         defw 51416
+         defw 200
+         defw 51312
+         defw 51400
+         defw 51400
+         defw 112
+         defw 51440
+         defw 61640
+         defw 49344
+         defw 192
+         defw 51312
+         defw 51400
+         defw 55528
+         defw 120
+         defw 51440
+         defw 61640
+         defw 51408
+         defw 200
+         defw 51312
+         defw 28864
+         defw 51208
+         defw 112
+         defw 24824
+         defw 24672
+         defw 24672
+         defw 96
+         defw 51400
+         defw 51400
+         defw 51400
+         defw 112
+         defw 51400
+         defw 51400
+         defw 20680
+         defw 32
+         defw 51400
+         defw 51400
+         defw 59592
+         defw 80
+         defw 55432
+         defw 24688
+         defw 55408
+         defw 136
+         defw 53384
+         defw 24672
+         defw 24672
+         defw 96
+         defw 6392
+         defw 24624
+         defw 49344
+         defw 248
+         defw 24696
+         defw 24672
+         defw 24672
+         defw 120
+         defw 32768
+         defw 24768
+         defw 6192
+         defw 8
+         defw 6264
+         defw 6168
+         defw 6168
+         defw 120
+         defw 28704
+         defw 8360
+         defw 8224
+         defw 32
+         defw 0
+         defw 0
+         defw 0
+         defw 252
+         defw 18480
+         defw 57416
+         defw 16448
+         defw 248
+         defw 0
+         defw 2160
+         defw 51320
+         defw 120
+         defw 49152
+         defw 61632
+         defw 51400
+         defw 240
+         defw 0
+         defw 49264
+         defw 49344
+         defw 112
+         defw 2048
+         defw 30728
+         defw 51400
+         defw 120
+         defw 0
+         defw 51312
+         defw 49392
+         defw 120
+         defw 14336
+         defw 28768
+         defw 24672
+         defw 96
+         defw 0
+         defw 51320
+         defw 30920
+         defw 28680
+         defw 49152
+         defw 61632
+         defw 51400
+         defw 200
+         defw 24576
+         defw 57344
+         defw 24672
+         defw 240
+         defw 12288
+         defw 12288
+         defw 12336
+         defw 24752
+         defw 49152
+         defw 57552
+         defw 53472
+         defw 200
+         defw 24576
+         defw 24672
+         defw 24672
+         defw 56
+         defw 0
+         defw 59600
+         defw 59624
+         defw 232
+         defw 0
+         defw 51440
+         defw 51400
+         defw 200
+         defw 0
+         defw 51312
+         defw 51400
+         defw 112
+         defw 0
+         defw 51440
+         defw 61640
+         defw 49344
+         defw 0
+         defw 51320
+         defw 30920
+         defw 6168
+         defw 0
+         defw 49272
+         defw 49344
+         defw 192
+         defw 0
+         defw 49264
+         defw 2160
+         defw 240
+         defw 24576
+         defw 24688
+         defw 24672
+         defw 56
+         defw 0
+         defw 51400
+         defw 51400
+         defw 112
+         defw 0
+         defw 51400
+         defw 28784
+         defw 32
+         defw 0
+         defw 59592
+         defw 59624
+         defw 80
+         defw 0
+         defw 55432
+         defw 55408
+         defw 136
+         defw 0
+         defw 51400
+         defw 30920
+         defw 28680
+         defw 0
+         defw 12536
+         defw 49248
+         defw 248
+         defw 24696
+         defw 49248
+         defw 24672
+         defw 120
+         defw 24672
+         defw 24672
+         defw 24672
+         defw 96
+         defw 12528
+         defw 6192
+         defw 12336
+         defw 240
+         defw 26676
+         defw 0
+         defw 0
+         defw 0
+         defw 34928
+         defw 51368
+         defw 34984
+         defw 112
+;------------------------------
+ANYKEY   call IINKEY
+         jr   z,ANYKEY
+         push af
+ANYKEY_0 call IINKEY
+         jr   nz,ANYKEY_0
+         pop  af
+         ret
+;------------------------------
+IINKEY   push hl
+         push de
+         push bc
+         ld   bc,#7FFE
+         ld   h,0
+         ld   d,h
+         ld   e,h
+II1      ld   l,5
+         in   a,(c)
+II2      inc  h
+         rrca
+         jr   c,II3
+         ld   d,e
+         ld   e,h
+II3      dec  l
+         jr   nz,II2
+         rrc  b
+         jr   c,II1
+         ld   a,e
+         cp   #24
+         jr   nz,II5
+         ld   e,d
+         ld   d,#24
+II5      cp   2
+         jr   nz,II6
+         ld   e,d
+         ld   d,2
+II6      ld   hl,IINN
+         xor  a
+         xor  d
+         jr   z,II7
+         ld   hl,IISS
+         cp   2
+         jr   z,II7
+         ld   hl,IICS
+         cp   #24
+         jr   z,II7
+         ld   a,1
+         jr   II8
+
+II7      ld   d,0
+         add  hl,de
+         ld   a,(hl)
+II8      and  a
+         pop  bc
+         pop  de
+         pop  hl
+         ret
+
+IINN     defb 0," ",#1C
+         defb "mnb"
+         defb 13
+         defb "lkjh"
+         defb "poiuy"
+         defb "09876"
+         defb "12345"
+         defb "qwert"
+         defb "asdfg"
+         defb 0
+         defb "zxcv"
+
+IICS     defb 0,#11,#0E
+         defb "MNB"
+         defb 2
+         defb "LKJH"
+         defb "POIUY"
+         defb #0C,#0F,9,#0B,#0A
+         defb 7,6,4,5,8
+         defb "QWERT"
+         defb "ASDFG"
+         defb #1F
+         defb "ZXCV"
+
+IISS     defb 0,16,#1E
+         defb ".,*"
+         defb 3
+         defb "=+-^"
+         defb 34 ;"
+         defb ";}{"
+         defb "_)('&"
+         defb "!@#$%"
+         defb #12,#13,#14
+         defb "<>"
+         defb "~|"
+         defb 92 ;\
+         defb 123 ;{
+         defb 125 ;}
+         defb #1D
+         defb ":`?/"    
+;------------------------------
+TEXT1    dc "FLASH III - MB03+ Ultimate"
+TEXT2    db 127
+         dc " LMN128/Jan Kucera/Zlin/CZ"
+TEXT3    dc "Select 16KB block: 0-9 or A-Z"
+;TEXT31   dc "2 - second 16KB"
+;TEXT32   dc "3-9 - etc"
+TEXT4    dc "Programming...."
+TEXT5    dc "Programming OK!"
+TEXT6    dc "Verifying...."
+TEXT7    dc "Verifying ERROR! Number of errors:"
+TEXT8    dc "Press any key  to finish."
+TEXT9    dc "Verifying OK!"
+TEXT10   dc "Block:"
+TEXT11   dc "Erasing........"
+FW1		 db "v:"
+DATE			
+	LUA ALLPASS
+	_pc('db	"' .. os.date("%Y%m%d") .. '"') 
+	ENDLUA
+	     dc " " 
+
+		
+
+moveend1
+/*			
+	BLOCK   (32768-moveend1),0	
+	org 32768
+	INCBIN boot.cod
+*/	
+	savesna "flash3.sna",start
